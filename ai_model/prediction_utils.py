@@ -12,7 +12,7 @@ import os
 MODEL_PATH = os.path.join(settings.BASE_DIR, 'ai_model', 'saved_models', 'time_recommendation_model.keras')
 
 # 올바른 Keras 접근 방식
-model = tf.keras.models.load_model('path/to/your/model')
+model = tf.keras.models.load_model(MODEL_PATH)
 
 def load_ai_model():
     """
