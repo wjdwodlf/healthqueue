@@ -11,9 +11,6 @@ import os
 # (3단계에서 생성될) AI 두뇌 파일의 경로를 지정합니다.
 MODEL_PATH = os.path.join(settings.BASE_DIR, 'ai_model', 'saved_models', 'time_recommendation_model.keras')
 
-# 올바른 Keras 접근 방식
-model = tf.keras.models.load_model(MODEL_PATH)
-
 def load_ai_model():
     """
     서버가 시작될 때 'settings.py'에 의해 호출될 함수입니다.
