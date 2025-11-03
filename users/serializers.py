@@ -1,7 +1,7 @@
 # users/serializers.py
 
 from django.contrib.auth.models import User
-from rest_framework import serializers
+from rest_framework import serializers, generics
 
 # User 모델의 데이터를 JSON 형태로 번역할 Serializer
 class UserSerializer(serializers.ModelSerializer):
