@@ -11,8 +11,8 @@ class ReportSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Report
-        fields = ['id', 'reporter', 'reported_user', 'equipment', 
-                  'equipment_name', 'reason', 'status', 'created_at']
+        fields = ['id', 'reporter', 'reported_user', 'equipment',
+                  'equipment_name', 'report_type', 'reason', 'status', 'created_at']
     
     def get_equipment_name(self, obj):
         """기구 이름을 반환합니다. 기구 정보가 없으면 None 반환"""

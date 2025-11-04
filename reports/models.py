@@ -10,6 +10,13 @@ class Report(models.Model):
     equipment = models.ForeignKey(Equipment, on_delete=models.SET_NULL, null=True, blank=True)
     reason = models.TextField()
     
+    TYPE_CHOICES = [
+        ('malfunction', 'Malfunction'),   # 기기 고장
+        ('violation', 'User Violation'),  # 사용자 문제
+        ('other', 'Other'),               # 기타
+    ]
+    report_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='other')
+    
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
         ('RESOLVED', 'Resolved'),
