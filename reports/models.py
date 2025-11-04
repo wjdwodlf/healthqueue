@@ -6,7 +6,7 @@ from equipment.models import Equipment
 
 class Report(models.Model):
     reporter = models.ForeignKey(User, related_name='filed_reports', on_delete=models.CASCADE)
-    reported_user = models.ForeignKey(User, related_name='received_reports', on_delete=models.CASCADE)
+    reported_user = models.ForeignKey(User, related_name='received_reports', on_delete=models.CASCADE, null=True, blank=True)
     equipment = models.ForeignKey(Equipment, on_delete=models.SET_NULL, null=True, blank=True)
     reason = models.TextField()
     
@@ -18,4 +18,9 @@ class Report(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
-        return f'Report from {self.reporter.username} about {self.reported_user.username}'
+        if self.reported_user:
+            return f'Report from {self.reporter.username} about {self.reported_user.username}'
+        elif self.equipment:
+            return f'Report from {self.reporter.username} about equipment {self.equipment.name}'
+        else:
+            return f'Report from {self.reporter.username}'
