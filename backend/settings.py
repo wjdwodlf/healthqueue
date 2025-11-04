@@ -147,6 +147,39 @@ REST_FRAMEWORK = {
     )
 }
 
+# Logging: ensure INFO logs reach console/journal (useful for gunicorn/systemd)
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '[%(levelname)s] %(asctime)s %(name)s: %(message)s'
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+        'users': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}
+
 # ==========================================================
 # 6. AI 모델 로드 설정 (파일 맨 아래)
 # (이전에 추가했던 AI 모델 로더도 여기에 포함되어야 합니다)
