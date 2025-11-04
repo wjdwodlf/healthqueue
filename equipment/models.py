@@ -42,6 +42,12 @@ class Equipment(models.Model):
         default=0, 
         help_text="AI 모델이 인식하는 기구 ID (training_script.py와 일치해야 함, 예: 0=벤치)"
     )
+    image_url = models.URLField(
+        max_length=500,
+        blank=True,
+        null=True,
+        help_text="기구 이미지 URL (외부 링크)"
+    )
 
     def __str__(self):
         return f'{self.gym.name} - {self.name}'
