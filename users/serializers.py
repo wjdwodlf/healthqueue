@@ -3,6 +3,9 @@
 from django.contrib.auth.models import User
 from rest_framework import serializers, generics
 from .models import UserProfile
+import logging
+
+logger = logging.getLogger(__name__)
 
 # User 모델의 데이터를 JSON 형태로 번역할 Serializer
 class UserSerializer(serializers.ModelSerializer):
@@ -45,11 +48,13 @@ class RegisterSerializer(serializers.ModelSerializer):
         name = validated_data.pop('name', '')
         
         # 디버깅: 받은 role 값 출력
-        print(f"[DEBUG] 회원가입 - username: {validated_data.get('username')}, role: {role}, name: {name}")
+        logger.info(f"회원가입 - username: {validated_data.get('username')}, role: {role}, name: {name}")
+        print(f"[REGISTER] username={validated_data.get('username')} | role={role} | name={name}")
         
         # role이 'OPERATOR'인 경우 is_staff를 True로 설정
         is_staff_value = (role == 'OPERATOR')
-        print(f"[DEBUG] role={role} → is_staff={is_staff_value}")
+        logger.info(f"role={role} → is_staff={is_staff_value}")
+        print(f"[REGISTER] role={role} → is_staff={is_staff_value}")
         
         # User 생성 - is_staff를 직접 설정
         user = User.objects.create_user(
@@ -60,12 +65,18 @@ class RegisterSerializer(serializers.ModelSerializer):
             first_name=name
         )
         
-        print(f"[DEBUG] User 생성 완료 - username: {user.username}, is_staff: {user.is_staff}")
+        logger.info("========== User 생성 완료 ==========")
+        logger.info(f"username: {user.username}")
+        logger.info(f"is_staff: {user.is_staff}")
+        logger.info(f"is_superuser: {user.is_superuser}")
+        logger.info("====================================")
+        print(f"[REGISTER] Created: {user.username} | is_staff={user.is_staff} | is_superuser={user.is_superuser}")
         
         # UserProfile 생성 (role 저장)
         from users.models import UserProfile
         profile = UserProfile.objects.create(user=user, role=role)
-        print(f"[DEBUG] UserProfile 생성 완료 - user: {user.username}, role: {profile.role}")
+        logger.info(f"UserProfile 생성 완료 - user: {user.username}, role: {profile.role}")
+        print(f"[REGISTER] UserProfile created: {user.username} | role={profile.role}")
         
         return user
     

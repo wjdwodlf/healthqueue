@@ -10,6 +10,9 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 from rest_framework_simplejwt.views import TokenObtainPairView
 from .serializers import UserSerializer, RegisterSerializer
 from .models import UserProfile
+import logging
+
+logger = logging.getLogger(__name__)
 
 class UserViewSet(viewsets.ModelViewSet):
     # 이 줄을 추가하여 '출입증 검사'를 설정합니다.
@@ -60,14 +63,26 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         try:
             profile = self.user.userprofile
             data['role'] = profile.role
-            print(f"[DEBUG] 로그인 성공 - username: {self.user.username}")
-            print(f"[DEBUG] UserProfile 존재 - role: {profile.role}")
-            print(f"[DEBUG] is_staff: {self.user.is_staff}")
+            logger.info("========== 로그인 디버깅 ==========")
+            logger.info(f"username: {self.user.username}")
+            logger.info(f"UserProfile.role: {profile.role}")
+            logger.info(f"User.is_staff: {self.user.is_staff}")
+            logger.info(f"User.is_superuser: {self.user.is_superuser}")
+            logger.info("====================================")
+            # print도 함께 사용 (콘솔 출력용)
+            print(f"[LOGIN] {self.user.username} | role={profile.role} | is_staff={self.user.is_staff} | is_superuser={self.user.is_superuser}")
         except UserProfile.DoesNotExist:
             data['role'] = 'MEMBER'
-            print(f"[DEBUG] 로그인 - username: {self.user.username}, UserProfile 없음! 기본값 MEMBER 사용")
+            logger.warning("========== 로그인 디버깅 ==========")
+            logger.warning(f"username: {self.user.username}")
+            logger.warning("UserProfile 없음! 기본값 MEMBER 사용")
+            logger.warning(f"User.is_staff: {self.user.is_staff}")
+            logger.warning(f"User.is_superuser: {self.user.is_superuser}")
+            logger.warning("====================================")
+            print(f"[LOGIN] {self.user.username} | NO PROFILE | is_staff={self.user.is_staff} | is_superuser={self.user.is_superuser}")
         
-        print(f"[DEBUG] 최종 응답 데이터: {data}")
+        logger.info(f"최종 응답 데이터: {data}")
+        print(f"[LOGIN] Response: {data}")
         
         return data
 
