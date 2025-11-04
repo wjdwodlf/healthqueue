@@ -21,12 +21,19 @@ class RegisterSerializer(serializers.ModelSerializer):
         extra_kwargs = {'password': {'write_only': True}}
 
     def create(self, validated_data):
-        # Serializer의 create 메서드를 오버라이드하여 비밀번호를 해싱(암호화)합니다.
-        user = User.objects.create_user(
-            username=validated_data['username'],
-            email=validated_data['email'],
-            password=validated_data['password']
-        )
+        role = validated_data.pop('role', 'MEMBER')  # 기본값은 'MEMBER'
+        user = User.objects.create_user(**validated_data)
+
+        # UserProfile 생성 및 role 설정
+        user_profile = UserProfile.objects.create(user=user, role=role)
+
+        # role에 따라 is_staff 설정
+        if role == 'OPERATOR':
+            user.is_staff = True
+        else:
+            user.is_staff = False
+        user.save()
+
         return user
     
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
