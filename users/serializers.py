@@ -43,18 +43,24 @@ class RegisterSerializer(serializers.ModelSerializer):
         extra_kwargs = {'password': {'write_only': True}}
 
     def create(self, validated_data):
+        import sys
+        
         # role과 name을 추출 (validated_data에서 제거)
         role = validated_data.pop('role', 'MEMBER')
         name = validated_data.pop('name', '')
         
         # 디버깅: 받은 role 값 출력
-        logger.info(f"회원가입 - username: {validated_data.get('username')}, role: {role}, name: {name}")
-        print(f"[REGISTER] username={validated_data.get('username')} | role={role} | name={name}")
+        log_msg = f"[REGISTER START] username={validated_data.get('username')} | role={role} | name={name}"
+        print(log_msg, flush=True)
+        sys.stdout.flush()
+        logger.info(log_msg)
         
         # role이 'OPERATOR'인 경우 is_staff를 True로 설정
         is_staff_value = (role == 'OPERATOR')
-        logger.info(f"role={role} → is_staff={is_staff_value}")
-        print(f"[REGISTER] role={role} → is_staff={is_staff_value}")
+        staff_log = f"[REGISTER] role={role} → is_staff={is_staff_value}"
+        print(staff_log, flush=True)
+        sys.stdout.flush()
+        logger.info(staff_log)
         
         # User 생성 - is_staff를 직접 설정
         user = User.objects.create_user(
@@ -65,18 +71,19 @@ class RegisterSerializer(serializers.ModelSerializer):
             first_name=name
         )
         
-        logger.info("========== User 생성 완료 ==========")
-        logger.info(f"username: {user.username}")
-        logger.info(f"is_staff: {user.is_staff}")
-        logger.info(f"is_superuser: {user.is_superuser}")
-        logger.info("====================================")
-        print(f"[REGISTER] Created: {user.username} | is_staff={user.is_staff} | is_superuser={user.is_superuser}")
+        user_log = f"[REGISTER] User Created: id={user.id} | username={user.username} | is_staff={user.is_staff} | is_superuser={user.is_superuser}"
+        print(user_log, flush=True)
+        sys.stdout.flush()
+        logger.info(user_log)
         
         # UserProfile 생성 (role 저장)
         from users.models import UserProfile
         profile = UserProfile.objects.create(user=user, role=role)
-        logger.info(f"UserProfile 생성 완료 - user: {user.username}, role: {profile.role}")
-        print(f"[REGISTER] UserProfile created: {user.username} | role={profile.role}")
+        
+        profile_log = f"[REGISTER] UserProfile Created: username={user.username} | role={profile.role}"
+        print(profile_log, flush=True)
+        sys.stdout.flush()
+        logger.info(profile_log)
         
         return user
     

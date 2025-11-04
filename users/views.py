@@ -53,9 +53,11 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         return token
     
     def validate(self, attrs):
+        import sys
         data = super().validate(attrs)
         
-        # 응답에 사용자 정보 추가
+        # 응답에 사용자 정보 추가 (id, username, name, role)
+        data['id'] = self.user.id
         data['username'] = self.user.username
         data['name'] = self.user.first_name or self.user.username
         
@@ -63,26 +65,27 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         try:
             profile = self.user.userprofile
             data['role'] = profile.role
-            logger.info("========== 로그인 디버깅 ==========")
-            logger.info(f"username: {self.user.username}")
-            logger.info(f"UserProfile.role: {profile.role}")
-            logger.info(f"User.is_staff: {self.user.is_staff}")
-            logger.info(f"User.is_superuser: {self.user.is_superuser}")
-            logger.info("====================================")
-            # print도 함께 사용 (콘솔 출력용)
-            print(f"[LOGIN] {self.user.username} | role={profile.role} | is_staff={self.user.is_staff} | is_superuser={self.user.is_superuser}")
+            
+            # 로그 출력 (여러 방식 동시 사용)
+            log_msg = f"[LOGIN SUCCESS] id={self.user.id} | username={self.user.username} | role={profile.role} | is_staff={self.user.is_staff} | is_superuser={self.user.is_superuser}"
+            print(log_msg, flush=True)
+            sys.stdout.flush()
+            logger.info(log_msg)
+            
         except UserProfile.DoesNotExist:
             data['role'] = 'MEMBER'
-            logger.warning("========== 로그인 디버깅 ==========")
-            logger.warning(f"username: {self.user.username}")
-            logger.warning("UserProfile 없음! 기본값 MEMBER 사용")
-            logger.warning(f"User.is_staff: {self.user.is_staff}")
-            logger.warning(f"User.is_superuser: {self.user.is_superuser}")
-            logger.warning("====================================")
-            print(f"[LOGIN] {self.user.username} | NO PROFILE | is_staff={self.user.is_staff} | is_superuser={self.user.is_superuser}")
+            
+            # 로그 출력
+            log_msg = f"[LOGIN WARNING] id={self.user.id} | username={self.user.username} | NO PROFILE | is_staff={self.user.is_staff} | is_superuser={self.user.is_superuser}"
+            print(log_msg, flush=True)
+            sys.stdout.flush()
+            logger.warning(log_msg)
         
-        logger.info(f"최종 응답 데이터: {data}")
-        print(f"[LOGIN] Response: {data}")
+        # 최종 응답 로그
+        response_log = f"[LOGIN RESPONSE] {data}"
+        print(response_log, flush=True)
+        sys.stdout.flush()
+        logger.info(response_log)
         
         return data
 
