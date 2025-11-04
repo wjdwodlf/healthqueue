@@ -44,26 +44,28 @@ class RegisterSerializer(serializers.ModelSerializer):
         role = validated_data.pop('role', 'MEMBER')
         name = validated_data.pop('name', '')
         
-        # Serializer의 create 메서드를 오버라이드하여 비밀번호를 해싱(암호화)합니다.
+        # 디버깅: 받은 role 값 출력
+        print(f"[DEBUG] 회원가입 - username: {validated_data.get('username')}, role: {role}, name: {name}")
+        
+        # role이 'OPERATOR'인 경우 is_staff를 True로 설정
+        is_staff_value = (role == 'OPERATOR')
+        print(f"[DEBUG] role={role} → is_staff={is_staff_value}")
+        
+        # User 생성 - is_staff를 직접 설정
         user = User.objects.create_user(
             username=validated_data['username'],
             email=validated_data['email'],
-            password=validated_data['password']
+            password=validated_data['password'],
+            is_staff=is_staff_value,
+            first_name=name
         )
         
-        # 이름이 제공된 경우 User 모델에 저장
-        if name:
-            user.first_name = name
-            user.save()
-        
-        # role이 'OPERATOR'인 경우 is_staff를 True로 설정
-        if role == 'OPERATOR':
-            user.is_staff = True
-            user.save()
+        print(f"[DEBUG] User 생성 완료 - username: {user.username}, is_staff: {user.is_staff}")
         
         # UserProfile 생성 (role 저장)
         from users.models import UserProfile
-        UserProfile.objects.create(user=user, role=role)
+        profile = UserProfile.objects.create(user=user, role=role)
+        print(f"[DEBUG] UserProfile 생성 완료 - user: {user.username}, role: {profile.role}")
         
         return user
     
