@@ -61,9 +61,19 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         data['username'] = self.user.username
         data['name'] = self.user.first_name or self.user.username
         
-        # UserProfile에서 role 가져오기
+        # UserProfile에서 role 가져오기 (없으면 자동 생성)
         try:
             profile = self.user.userprofile
+            # is_staff와 profile.role이 일치하지 않으면 동기화
+            expected_role = 'OPERATOR' if self.user.is_staff else 'MEMBER'
+            if profile.role != expected_role:
+                profile.role = expected_role
+                profile.save()
+                log_msg = f"[LOGIN SYNC] id={self.user.id} | username={self.user.username} | role updated to {expected_role}"
+                print(log_msg, flush=True)
+                sys.stdout.flush()
+                logger.info(log_msg)
+            
             data['role'] = profile.role
             
             # 로그 출력 (여러 방식 동시 사용)
@@ -73,13 +83,16 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
             logger.info(log_msg)
             
         except UserProfile.DoesNotExist:
-            data['role'] = 'MEMBER'
+            # UserProfile이 없으면 is_staff 기반으로 생성
+            role = 'OPERATOR' if self.user.is_staff else 'MEMBER'
+            profile = UserProfile.objects.create(user=self.user, role=role)
+            data['role'] = role
             
             # 로그 출력
-            log_msg = f"[LOGIN WARNING] id={self.user.id} | username={self.user.username} | NO PROFILE | is_staff={self.user.is_staff} | is_superuser={self.user.is_superuser}"
+            log_msg = f"[LOGIN AUTO-CREATE] id={self.user.id} | username={self.user.username} | created profile with role={role} | is_staff={self.user.is_staff}"
             print(log_msg, flush=True)
             sys.stdout.flush()
-            logger.warning(log_msg)
+            logger.info(log_msg)
         
         # 최종 응답 로그
         response_log = f"[LOGIN RESPONSE] {data}"
