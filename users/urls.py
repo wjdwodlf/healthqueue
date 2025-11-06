@@ -9,6 +9,7 @@ router = DefaultRouter()
 router.register(r'users', UserViewSet) # 'users' 경로에 UserViewSet을 등록
 
 urlpatterns = [
-    path('', include(router.urls)),
+    # 주의: 'users/<pk>/' 라우트보다 'users/profile/'가 먼저 매칭되도록 순서 중요
     path('users/profile/', current_user_profile, name='current_user_profile'),
+    path('', include(router.urls)),
 ]
