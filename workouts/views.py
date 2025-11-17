@@ -13,9 +13,12 @@ from users.models import UserProfile # UserProfile 모델 import
 from django.utils import timezone
 from django.db import transaction
 import datetime
+import logging
 
 # "AI 두뇌 사용설명서"에서 예측 함수를 가져옵니다.
 from ai_model.prediction_utils import get_ai_recommendation
+
+logger = logging.getLogger(__name__)
 
 class UsageSessionViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated] # <- 이 줄 추가
@@ -150,16 +153,28 @@ class StartSessionView(APIView):
 
             # --- AI 추천 로직 끝 ---
 
-        # 5. 새로운 운동 세션 생성 (inside transaction)
-        equipment.status = 'IN_USE'
-        equipment.save()
+        # 5. 새로운 운동 세션 생성 — do this inside a short transaction and log outcomes
+        try:
+            with transaction.atomic():
+                # re-lock equipment row and double-check availability
+                equipment = Equipment.objects.select_for_update().get(pk=equipment.pk)
+                if equipment.status != 'AVAILABLE' and not reservation:
+                    logger.warning(f"Equipment {equipment.pk} not available at commit time: {equipment.status}")
+                    return Response({'error': '기구가 사용 불가 상태입니다.'}, status=status.HTTP_409_CONFLICT)
 
-        session = UsageSession.objects.create(
-            user=user,
-            equipment=equipment,
-            allocated_duration_minutes=allocated_time,
-            session_type=session_type
-        )
+                equipment.status = 'IN_USE'
+                equipment.save()
+
+                session = UsageSession.objects.create(
+                    user=user,
+                    equipment=equipment,
+                    allocated_duration_minutes=allocated_time,
+                    session_type=session_type
+                )
+
+        except Exception as e:
+            logger.exception("Failed to create UsageSession or update Equipment status")
+            return Response({'error': '서버 에러: 세션 생성 실패'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         serializer = UsageSessionSerializer(session)
         # Include current equipment info for FE debugging (so FE can immediately
