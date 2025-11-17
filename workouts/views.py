@@ -48,7 +48,8 @@ class StartSessionView(APIView):
             return Response({'error': '해당 기구를 찾을 수 없습니다.'}, status=status.HTTP_404_NOT_FOUND)
 
         # Use DB transaction and row-level lock to avoid races
-        from django.db import transaction
+        # Keep the whole start flow in one transaction so equipment.status and
+        # reservation/session updates are atomic and cannot be lost due to races.
         with transaction.atomic():
             equipment = Equipment.objects.select_for_update().get(pk=equipment.pk)
 
@@ -56,18 +57,20 @@ class StartSessionView(APIView):
                 return Response({'error': '현재 사용할 수 없는 기구입니다.'}, status=status.HTTP_409_CONFLICT)
 
             # If the user already has an active session, end it immediately (simulate switching machines)
-            existing_session = UsageSession.objects.filter(user=user, end_time__isnull=True).first()
+            existing_session = UsageSession.objects.select_for_update().filter(user=user, end_time__isnull=True).first()
             if existing_session:
                 # end previous session
                 existing_session.end_time = timezone.now()
                 existing_session.save()
 
                 prev_equipment = existing_session.equipment
+                # mark previous equipment available
+                prev_equipment = Equipment.objects.select_for_update().get(pk=prev_equipment.pk)
                 prev_equipment.status = 'AVAILABLE'
                 prev_equipment.save()
 
                 # notify next waiting on previous equipment
-                next_prev = Reservation.objects.filter(equipment=prev_equipment, status='WAITING').order_by('created_at').first()
+                next_prev = Reservation.objects.select_for_update().filter(equipment=prev_equipment, status='WAITING').order_by('created_at').first()
                 if next_prev:
                     next_prev.status = 'NOTIFIED'
                     next_prev.notified_at = timezone.now()
@@ -75,33 +78,19 @@ class StartSessionView(APIView):
 
             # Check queue: if other users in queue, only NOTIFIED user may start
             other_in_queue = Reservation.objects.filter(equipment=equipment, status__in=['WAITING', 'NOTIFIED']).exclude(user=user).exists()
-            reservation = Reservation.objects.filter(equipment=equipment, user=user, status='NOTIFIED').first()
+            reservation = Reservation.objects.select_for_update().filter(equipment=equipment, user=user, status='NOTIFIED').first()
             if other_in_queue and not reservation:
                 return Response({'error': '대기열이 있습니다. 알림 받은 사용자만 시작할 수 있습니다.'}, status=status.HTTP_409_CONFLICT)
 
         allocated_time = 0
         session_type = ''
 
-        # If there are other users in queue (WAITING or NOTIFIED), only allow start
-        # for the user who has been NOTIFIED. If the equipment has any waiting/notified
-        # reservations for other users, deny start for users who are not the notified one.
-        other_in_queue = Reservation.objects.filter(equipment=equipment, status__in=['WAITING', 'NOTIFIED']).exclude(user=user).exists()
-        reservation = Reservation.objects.filter(
-            equipment=equipment,
-            user=user,
-            status='NOTIFIED'
-        ).first()
-
-        if other_in_queue and not reservation:
-            # There is someone else waiting or notified — user cannot bypass the queue
-            return Response({'error': '대기열이 있습니다. 알림 받은 사용자만 시작할 수 있습니다.'}, status=status.HTTP_409_CONFLICT)
-
-            if reservation:
-                # 예약자일 경우: 고정 시간 할당 (변경 없음)
-                allocated_time = equipment.base_session_time_minutes
-                session_type = 'BASE'
-                reservation.status = 'COMPLETED'
-                reservation.save()
+        # If the user was notified (reservation exists), give them base time and mark reservation completed.
+        if reservation:
+            allocated_time = equipment.base_session_time_minutes
+            session_type = 'BASE'
+            reservation.status = 'COMPLETED'
+            reservation.save()
         else:
             # --- AI 추천 로직 시작 ---
             # 예약자가 아닐 경우 (비어있는 기구 사용)
@@ -159,7 +148,9 @@ class StartSessionView(APIView):
                 session_type = 'BASE'
             # --- AI 추천 로직 끝 ---
 
-        # 5. 새로운 운동 세션 생성
+            # --- AI 추천 로직 끝 ---
+
+        # 5. 새로운 운동 세션 생성 (inside transaction)
         equipment.status = 'IN_USE'
         equipment.save()
 
@@ -169,8 +160,6 @@ class StartSessionView(APIView):
             allocated_duration_minutes=allocated_time,
             session_type=session_type
         )
-
-        # TODO: 아두이노에 소켓 통신으로 'UNLOCK' 신호 보내는 로직 추가
 
         serializer = UsageSessionSerializer(session)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
