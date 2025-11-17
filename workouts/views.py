@@ -162,7 +162,18 @@ class StartSessionView(APIView):
         )
 
         serializer = UsageSessionSerializer(session)
-        return Response(serializer.data, status=status.HTTP_201_CREATED)
+        # Include current equipment info for FE debugging (so FE can immediately
+        # reflect server-side equipment.status without extra fetch).
+        response_data = serializer.data
+        try:
+            response_data['equipment_status'] = equipment.status
+            response_data['equipment_id'] = equipment.id
+            response_data['equipment_name'] = equipment.name
+        except Exception:
+            # Defensive: if equipment is not present for any reason, don't break the response
+            pass
+
+        return Response(response_data, status=status.HTTP_201_CREATED)
     
 
 class EndSessionView(APIView):
