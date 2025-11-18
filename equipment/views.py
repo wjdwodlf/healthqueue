@@ -12,6 +12,7 @@ from .serializers import EquipmentSerializer
 from users.models import UserProfile
 from reports.models import Report
 from gyms.models import GymMembership, Gym
+from workouts.models import Reservation
 
 # 추가: SSE(Server-Sent Events) 지원을 위한 임포트
 from django.http import StreamingHttpResponse, HttpResponse
@@ -162,17 +163,42 @@ def equipment_stream(request):
                 'status': getattr(eq, 'status', None),
                 'image_url': getattr(eq, 'image_url', '') or getattr(eq, 'image', ''),
                 'base_session_time_minutes': getattr(eq, 'base_session_time_minutes', None),
-                'waiting_count': getattr(eq, 'waiting_count', 0),
+                # compute waiting count dynamically
+                'waiting_count': Reservation.objects.filter(equipment=eq, status='WAITING').count(),
             })
 
         yield f"event: initial\ndata: {json.dumps(serialized)}\n\n"
+        # build last-seen snapshot to detect changes
+        last_state = {item['id']: item for item in serialized}
 
-        # keep connection alive; production should push real updates
+        # poll interval (seconds) can be configured in settings; default to 2s for responsive updates
+        poll_interval = getattr(settings, 'EQUIPMENT_SSE_POLL_INTERVAL_SECONDS', 5)
+
         try:
             while True:
-                time.sleep(15)
-                # heartbeat (empty payload)
-                yield "event: heartbeat\ndata: {}\n\n"
+                time.sleep(poll_interval)
+
+                # Fetch current equipments and compare against last_state
+                current_equips = Equipment.objects.all()
+                for eq in current_equips:
+                    eq_id = str(eq.id)
+                    waiting_count = Reservation.objects.filter(equipment=eq, status='WAITING').count()
+                    current_repr = {
+                        'id': eq_id,
+                        'name': eq.name,
+                        'type': getattr(eq, 'type', None),
+                        'status': getattr(eq, 'status', None),
+                        'image_url': getattr(eq, 'image_url', '') or getattr(eq, 'image', ''),
+                        'base_session_time_minutes': getattr(eq, 'base_session_time_minutes', None),
+                        'waiting_count': waiting_count,
+                    }
+
+                    last = last_state.get(eq_id)
+                    if last is None or last.get('status') != current_repr['status'] or last.get('waiting_count') != current_repr['waiting_count']:
+                        # send an update event for this equipment
+                        yield f"event: update\ndata: {json.dumps(current_repr)}\n\n"
+                        last_state[eq_id] = current_repr
+
         except GeneratorExit:
             # client disconnected
             return

@@ -11,12 +11,14 @@ from .serializers import UsageSessionSerializer, ReservationSerializer
 from equipment.models import Equipment # Equipment 모델 import
 from users.models import UserProfile # UserProfile 모델 import
 from django.utils import timezone
+from django.conf import settings
 from django.db import transaction
 import datetime
 import logging
 
 # "AI 두뇌 사용설명서"에서 예측 함수를 가져옵니다.
 from ai_model.prediction_utils import get_ai_recommendation
+from .tasks import DEFAULT_NOTIFICATION_TIMEOUT_MINUTES
 
 logger = logging.getLogger(__name__)
 
@@ -87,8 +89,30 @@ class StartSessionView(APIView):
                     next_prev.save()
 
             # Check queue: if other users in queue, only NOTIFIED user may start
-            other_in_queue = Reservation.objects.filter(equipment=equipment, status__in=['WAITING', 'NOTIFIED']).exclude(user=user).exists()
-            reservation = Reservation.objects.select_for_update().filter(equipment=equipment, user=user, status='NOTIFIED').first()
+            # Treat only recent NOTIFIED reservations (within the notification timeout) as blocking.
+            minutes_default = getattr(settings, 'WORKOUT_NOTIFICATION_TIMEOUT_MINUTES', None)
+            if minutes_default is None:
+                minutes_default = DEFAULT_NOTIFICATION_TIMEOUT_MINUTES
+            try:
+                minutes_default = float(minutes_default)
+            except Exception:
+                minutes_default = DEFAULT_NOTIFICATION_TIMEOUT_MINUTES or 0.25
+
+            notified_cutoff = timezone.now() - datetime.timedelta(minutes=minutes_default)
+
+            # Expire any stale NOTIFIED reservations for this equipment so they don't block a Start
+            stale_qs = Reservation.objects.select_for_update().filter(equipment=equipment, status='NOTIFIED', notified_at__lt=notified_cutoff)
+            if stale_qs.exists():
+                for stale in list(stale_qs):
+                    stale.status = 'EXPIRED'
+                    stale.save()
+
+            other_waiting = Reservation.objects.filter(equipment=equipment, status='WAITING').exclude(user=user).exists()
+            other_recent_notified = Reservation.objects.filter(equipment=equipment, status='NOTIFIED', notified_at__gte=notified_cutoff).exclude(user=user).exists()
+            other_in_queue = other_waiting or other_recent_notified
+
+            # Reservation for this user is only valid if it's a recent NOTIFIED one
+            reservation = Reservation.objects.select_for_update().filter(equipment=equipment, user=user, status='NOTIFIED', notified_at__gte=notified_cutoff).first()
             if other_in_queue and not reservation:
                 return Response({'error': '대기열이 있습니다. 알림 받은 사용자만 시작할 수 있습니다.'}, status=status.HTTP_409_CONFLICT)
 

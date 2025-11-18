@@ -180,11 +180,12 @@ except ImportError:
 CELERY_BROKER_URL = env('CELERY_BROKER_URL', default='redis://localhost:6379/0')
 CELERY_RESULT_BACKEND = env('CELERY_RESULT_BACKEND', default=CELERY_BROKER_URL)
 
-# Beat 스케줄: expire task를 1분마다 실행하여 NOTIFIED 예약 만료 처리를 수행합니다.
+# Beat 스케줄: expire task를 주기적으로 실행하여 NOTIFIED 예약 만료 처리를 수행합니다.
+# 권장: 알림 타임아웃(예: 15초)과 맞추기 위해 15초 간격으로 실행하는 것을 권장합니다.
 CELERY_BEAT_SCHEDULE = {
-    'expire-reservations-every-minute': {
+    'expire-reservations-every-15s': {
         'task': 'workouts.tasks.expire_notified_reservations',
-        'schedule': 60.0,  # seconds
+        'schedule': 15.0,  # seconds (recommended)
         'args': (),
     },
 }
