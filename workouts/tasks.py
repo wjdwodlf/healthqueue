@@ -6,10 +6,7 @@ from .models import Reservation
 
 from .models import UsageSession
 from equipment.models import Equipment
-
-# Single source-of-truth for notification timeout (minutes). Keep in tasks so
-# other runtime code can import it directly.
-DEFAULT_NOTIFICATION_TIMEOUT_MINUTES = 0.25
+from .constants import DEFAULT_NOTIFICATION_TIMEOUT_MINUTES
 
 
 @shared_task(bind=True)

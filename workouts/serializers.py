@@ -6,8 +6,8 @@ from django.utils import timezone
 from django.conf import settings
 from datetime import timedelta
 try:
-    # Import the default timeout from tasks so serializer uses the same single source-of-truth
-    from .tasks import DEFAULT_NOTIFICATION_TIMEOUT_MINUTES
+    # Import the default timeout from constants (not tasks) to avoid loading Celery
+    from .constants import DEFAULT_NOTIFICATION_TIMEOUT_MINUTES
 except Exception:
     DEFAULT_NOTIFICATION_TIMEOUT_MINUTES = None
 

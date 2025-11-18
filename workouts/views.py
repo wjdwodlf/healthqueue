@@ -17,8 +17,9 @@ import datetime
 import logging
 
 # "AI 두뇌 사용설명서"에서 예측 함수를 가져옵니다.
-from ai_model.prediction_utils import get_ai_recommendation
-from .tasks import DEFAULT_NOTIFICATION_TIMEOUT_MINUTES
+# NOTE: Lazy import ai_model to avoid loading heavy ML dependencies at startup
+# from ai_model.prediction_utils import get_ai_recommendation
+from .constants import DEFAULT_NOTIFICATION_TIMEOUT_MINUTES
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,9 @@ class StartSessionView(APIView):
             # --- AI 추천 로직 시작 ---
             # 예약자가 아닐 경우 (비어있는 기구 사용)
             try:
+                # Lazy import to avoid loading ML libs at startup
+                from ai_model.prediction_utils import get_ai_recommendation
+                
                 user_profile = UserProfile.objects.get(user=user)
                 
                 # 1. 최근 24시간 운동 기록을 DB에서 조회
