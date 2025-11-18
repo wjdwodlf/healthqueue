@@ -4,13 +4,23 @@ from django.db import transaction
 from datetime import timedelta
 from .models import Reservation
 
+from .models import UsageSession
+from equipment.models import Equipment
+
+# Single source-of-truth for notification timeout (minutes). Keep in tasks so
+# other runtime code can import it directly.
+DEFAULT_NOTIFICATION_TIMEOUT_MINUTES = 0.25
+
 
 @shared_task(bind=True)
-def expire_notified_reservations(self, timeout_minutes: float = 0.25, batch_size: int = 50):
+def expire_notified_reservations(self, timeout_minutes: float = None, batch_size: int = 50):
     """
     Expire NOTIFIED reservations older than timeout_minutes and notify next waiting users.
     This task is intended to be run periodically (or scheduled per-reservation).
     """
+    # Use the module-level DEFAULT_NOTIFICATION_TIMEOUT_MINUTES when caller doesn't pass a value
+    if timeout_minutes is None:
+        timeout_minutes = DEFAULT_NOTIFICATION_TIMEOUT_MINUTES
     cutoff = timezone.now() - timedelta(minutes=timeout_minutes)
     expired_total = 0
     notified_total = 0
@@ -47,3 +57,61 @@ def expire_notified_reservations(self, timeout_minutes: float = 0.25, batch_size
                     # TODO: enqueue/send FCM push notification for next_r.user
 
     return {'expired': expired_total, 'notified': notified_total}
+
+
+@shared_task(bind=True)
+def expire_active_sessions(self, batch_size: int = 50):
+    """
+    Find UsageSession rows that have passed their allocated_duration_minutes
+    (i.e. should have ended) and end them automatically. For each ended
+    session, mark the equipment AVAILABLE and notify the next waiting user
+    (if any) by moving one WAITING -> NOTIFIED and setting notified_at.
+
+    This is intended to be run periodically (e.g. every 30s or 1min) via
+    Celery Beat.
+    """
+    now = timezone.now()
+    ended = 0
+    notified = 0
+
+    while True:
+        with transaction.atomic():
+            qs = (
+                UsageSession.objects.select_for_update(skip_locked=True)
+                .filter(end_time__isnull=True)
+                .order_by('start_time')[:batch_size]
+            )
+
+            sessions = list(qs)
+            if not sessions:
+                break
+
+            for s in sessions:
+                try:
+                    expected_end = s.start_time + timedelta(minutes=s.allocated_duration_minutes)
+                    if expected_end <= now:
+                        s.end_time = now
+                        s.save()
+                        ended += 1
+
+                        # update equipment and notify next waiting
+                        eq = Equipment.objects.select_for_update().get(pk=s.equipment.pk)
+                        eq.status = 'AVAILABLE'
+                        eq.save()
+
+                        next_r = (
+                            Reservation.objects.select_for_update(skip_locked=True)
+                            .filter(equipment=eq, status='WAITING')
+                            .order_by('created_at')
+                            .first()
+                        )
+                        if next_r:
+                            next_r.status = 'NOTIFIED'
+                            next_r.notified_at = timezone.now()
+                            next_r.save()
+                            notified += 1
+                except Exception:
+                    # if any row-specific error occurs, skip to next
+                    continue
+
+    return {'ended': ended, 'notified': notified}

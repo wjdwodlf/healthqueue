@@ -1,4 +1,4 @@
-from django.shortcuts import render
+from django.shortcuts import render, get_object_or_404
 # equipment/views.py
 
 from rest_framework import viewsets, status
@@ -12,6 +12,14 @@ from .serializers import EquipmentSerializer
 from users.models import UserProfile
 from reports.models import Report
 from gyms.models import GymMembership, Gym
+
+# 추가: SSE(Server-Sent Events) 지원을 위한 임포트
+from django.http import StreamingHttpResponse, HttpResponse
+import json
+import time
+from django.conf import settings
+from rest_framework_simplejwt.backends import TokenBackend
+from django.contrib.auth import get_user_model
 
 
 class EquipmentViewSet(viewsets.ModelViewSet):
@@ -104,3 +112,71 @@ class EquipmentViewSet(viewsets.ModelViewSet):
             })
 
         return Response(results, status=status.HTTP_200_OK)
+
+
+def equipment_stream(request):
+    """
+    Simple SSE endpoint that accepts either session-authenticated requests
+    or an `access_token` query parameter (Simple JWT). This view will
+    stream an initial snapshot of equipments as an SSE 'initial' event,
+    then keep the connection alive by sending heartbeat events.
+
+    NOTE: This is a simple implementation intended to enable the FE to
+    open EventSource with a token-in-query. For production push updates
+    you should integrate with Django Channels, Redis pub/sub or another
+    async push mechanism to send updates when equipments change.
+    """
+    # Authenticate by token-in-query OR session/cookie
+    token = request.GET.get('access_token')
+    user = None
+    if token:
+        try:
+            tb = TokenBackend(algorithm=settings.SIMPLE_JWT.get('ALGORITHM', 'HS256'), signing_key=settings.SIMPLE_JWT.get('SIGNING_KEY', settings.SECRET_KEY))
+            payload = tb.decode(token, verify=True)
+            user_id = payload.get('user_id') or payload.get('user')
+            if not user_id:
+                return HttpResponse(status=401)
+            User = get_user_model()
+            try:
+                user = User.objects.get(pk=user_id)
+            except User.DoesNotExist:
+                return HttpResponse(status=401)
+        except Exception as e:
+            return HttpResponse(status=401)
+    else:
+        # Fall back to Django authentication (session/cookie)
+        if request.user and request.user.is_authenticated:
+            user = request.user
+        else:
+            return HttpResponse(status=401)
+
+    def event_stream():
+        # initial snapshot: send all equipments as a single event
+        equipments = Equipment.objects.all()
+        serialized = []
+        for eq in equipments:
+            serialized.append({
+                'id': str(eq.id),
+                'name': eq.name,
+                'type': getattr(eq, 'type', None),
+                'status': getattr(eq, 'status', None),
+                'image_url': getattr(eq, 'image_url', '') or getattr(eq, 'image', ''),
+                'base_session_time_minutes': getattr(eq, 'base_session_time_minutes', None),
+                'waiting_count': getattr(eq, 'waiting_count', 0),
+            })
+
+        yield f"event: initial\ndata: {json.dumps(serialized)}\n\n"
+
+        # keep connection alive; production should push real updates
+        try:
+            while True:
+                time.sleep(15)
+                # heartbeat (empty payload)
+                yield "event: heartbeat\ndata: {}\n\n"
+        except GeneratorExit:
+            # client disconnected
+            return
+
+    response = StreamingHttpResponse(event_stream(), content_type='text/event-stream')
+    response['Cache-Control'] = 'no-cache'
+    return response
