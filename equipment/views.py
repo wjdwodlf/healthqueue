@@ -34,28 +34,28 @@ class EquipmentViewSet(viewsets.ModelViewSet):
     def list(self, request, *args, **kwargs):
         """Override list to batch-compute waiting counts to avoid N+1 queries."""
         from workouts.models import Reservation  # lazy import to avoid circular dependency at module load
-        from django.db.models import Count
+        from django.db.models import Count, Q
         
-        qs = self.get_queryset()
-        # Evaluate QS to get ids
-        equips = list(qs)
-        equip_ids = [e.id for e in equips]
-
-        # Batch query waiting counts
-        waiting_qs = Reservation.objects.filter(equipment_id__in=equip_ids, status='WAITING')\
-            .values('equipment_id')\
-            .annotate(waiting_count=Count('id'))
-        waiting_map = {item['equipment_id']: item['waiting_count'] for item in waiting_qs}
-
-        serializer = self.get_serializer(equips, many=True)
+        # CRITICAL OPTIMIZATION: Use annotate to compute waiting_count in a SINGLE query
+        # instead of two separate queries (Equipment fetch + Reservation count)
+        qs = self.get_queryset().annotate(
+            waiting_count=Count(
+                'reservation',
+                filter=Q(reservation__status='WAITING'),
+                distinct=True
+            )
+        )
+        
+        serializer = self.get_serializer(qs, many=True)
         data = serializer.data
-        # attach waiting_count to each serialized item
-        for item in data:
-            try:
-                eid = int(item.get('id'))
-            except Exception:
-                eid = None
-            item['waiting_count'] = waiting_map.get(eid, 0)
+        
+        # Attach pre-computed waiting_count to serialized data
+        equips_list = list(qs)
+        for idx, item in enumerate(data):
+            if idx < len(equips_list):
+                item['waiting_count'] = equips_list[idx].waiting_count
+            else:
+                item['waiting_count'] = 0
 
         return Response(data)
 
@@ -184,17 +184,17 @@ def equipment_stream(request):
 
     def event_stream():
         # initial snapshot: send all equipments as a single event
-        # Batch compute waiting counts to avoid N+1 queries
+        # CRITICAL OPTIMIZATION: Use annotate to compute waiting_count in a SINGLE query
         from workouts.models import Reservation  # lazy import
-        from django.db.models import Count
+        from django.db.models import Count, Q
         
-        equipments = Equipment.objects.all()
-        equip_ids = [eq.id for eq in equipments]
-        
-        waiting_qs = Reservation.objects.filter(equipment_id__in=equip_ids, status='WAITING')\
-            .values('equipment_id')\
-            .annotate(waiting_count=Count('id'))
-        waiting_map = {item['equipment_id']: item['waiting_count'] for item in waiting_qs}
+        equipments = Equipment.objects.all().annotate(
+            waiting_count=Count(
+                'reservation',
+                filter=Q(reservation__status='WAITING'),
+                distinct=True
+            )
+        )
         
         serialized = []
         for eq in equipments:
@@ -205,32 +205,31 @@ def equipment_stream(request):
                 'status': getattr(eq, 'status', None),
                 'image_url': getattr(eq, 'image_url', '') or getattr(eq, 'image', ''),
                 'base_session_time_minutes': getattr(eq, 'base_session_time_minutes', None),
-                'waiting_count': waiting_map.get(eq.id, 0),
+                'waiting_count': eq.waiting_count,
             })
 
         yield f"event: initial\ndata: {json.dumps(serialized)}\n\n"
         # build last-seen snapshot to detect changes
         last_state = {item['id']: item for item in serialized}
 
-        # poll interval (seconds) can be configured in settings; default to 5s for responsive updates
-        poll_interval = getattr(settings, 'EQUIPMENT_SSE_POLL_INTERVAL_SECONDS', 5)
+        # poll interval (seconds) can be configured in settings; default to 30s to reduce DB load
+        poll_interval = getattr(settings, 'EQUIPMENT_SSE_POLL_INTERVAL_SECONDS', 30)
 
         try:
             while True:
                 time.sleep(poll_interval)
 
-                # Fetch current equipments and compare against last_state
-                # Batch compute waiting counts here too
-                current_equips = Equipment.objects.all()
-                current_ids = [eq.id for eq in current_equips]
-                waiting_qs = Reservation.objects.filter(equipment_id__in=current_ids, status='WAITING')\
-                    .values('equipment_id')\
-                    .annotate(waiting_count=Count('id'))
-                waiting_map = {item['equipment_id']: item['waiting_count'] for item in waiting_qs}
+                # Fetch current equipments with annotated waiting_count in SINGLE query
+                current_equips = Equipment.objects.all().annotate(
+                    waiting_count=Count(
+                        'reservation',
+                        filter=Q(reservation__status='WAITING'),
+                        distinct=True
+                    )
+                )
                 
                 for eq in current_equips:
                     eq_id = str(eq.id)
-                    waiting_count = waiting_map.get(eq.id, 0)
                     current_repr = {
                         'id': eq_id,
                         'name': eq.name,
@@ -238,7 +237,7 @@ def equipment_stream(request):
                         'status': getattr(eq, 'status', None),
                         'image_url': getattr(eq, 'image_url', '') or getattr(eq, 'image', ''),
                         'base_session_time_minutes': getattr(eq, 'base_session_time_minutes', None),
-                        'waiting_count': waiting_count,
+                        'waiting_count': eq.waiting_count,
                     }
 
                     last = last_state.get(eq_id)

@@ -192,6 +192,7 @@ CELERY_BEAT_SCHEDULE = {
 # SSE polling frequency used by the simple equipment_stream prototype. Lower
 # values make the UI more responsive but increase DB load. Tune for your
 # deployment; we recommend 2-5 seconds for small deployments, 10+ for larger.
-EQUIPMENT_SSE_POLL_INTERVAL_SECONDS = 5
+# INCREASED TO 30s TO REDUCE DB LOAD - Real-time updates handled by client polling instead
+EQUIPMENT_SSE_POLL_INTERVAL_SECONDS = 30
 
 
