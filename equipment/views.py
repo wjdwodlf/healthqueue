@@ -180,7 +180,16 @@ def equipment_stream(request):
 
     def event_stream():
         # initial snapshot: send all equipments as a single event
+        # Batch compute waiting counts to avoid N+1 queries
+        from django.db.models import Count
         equipments = Equipment.objects.all()
+        equip_ids = [eq.id for eq in equipments]
+        
+        waiting_qs = Reservation.objects.filter(equipment_id__in=equip_ids, status='WAITING')\
+            .values('equipment_id')\
+            .annotate(waiting_count=Count('id'))
+        waiting_map = {item['equipment_id']: item['waiting_count'] for item in waiting_qs}
+        
         serialized = []
         for eq in equipments:
             serialized.append({
@@ -190,15 +199,14 @@ def equipment_stream(request):
                 'status': getattr(eq, 'status', None),
                 'image_url': getattr(eq, 'image_url', '') or getattr(eq, 'image', ''),
                 'base_session_time_minutes': getattr(eq, 'base_session_time_minutes', None),
-                # compute waiting count dynamically
-                'waiting_count': Reservation.objects.filter(equipment=eq, status='WAITING').count(),
+                'waiting_count': waiting_map.get(eq.id, 0),
             })
 
         yield f"event: initial\ndata: {json.dumps(serialized)}\n\n"
         # build last-seen snapshot to detect changes
         last_state = {item['id']: item for item in serialized}
 
-        # poll interval (seconds) can be configured in settings; default to 2s for responsive updates
+        # poll interval (seconds) can be configured in settings; default to 5s for responsive updates
         poll_interval = getattr(settings, 'EQUIPMENT_SSE_POLL_INTERVAL_SECONDS', 5)
 
         try:
@@ -206,10 +214,17 @@ def equipment_stream(request):
                 time.sleep(poll_interval)
 
                 # Fetch current equipments and compare against last_state
+                # Batch compute waiting counts here too
                 current_equips = Equipment.objects.all()
+                current_ids = [eq.id for eq in current_equips]
+                waiting_qs = Reservation.objects.filter(equipment_id__in=current_ids, status='WAITING')\
+                    .values('equipment_id')\
+                    .annotate(waiting_count=Count('id'))
+                waiting_map = {item['equipment_id']: item['waiting_count'] for item in waiting_qs}
+                
                 for eq in current_equips:
                     eq_id = str(eq.id)
-                    waiting_count = Reservation.objects.filter(equipment=eq, status='WAITING').count()
+                    waiting_count = waiting_map.get(eq.id, 0)
                     current_repr = {
                         'id': eq_id,
                         'name': eq.name,
