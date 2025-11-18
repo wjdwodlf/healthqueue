@@ -25,8 +25,35 @@ from django.contrib.auth import get_user_model
 
 class EquipmentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
-    queryset = Equipment.objects.all()
+    # use select_related for gym to avoid N+1 when serializer accesses gym.name
+    queryset = Equipment.objects.all().select_related('gym')
     serializer_class = EquipmentSerializer
+
+    def list(self, request, *args, **kwargs):
+        """Override list to batch-compute waiting counts to avoid N+1 queries."""
+        qs = self.get_queryset()
+        # Evaluate QS to get ids
+        equips = list(qs)
+        equip_ids = [e.id for e in equips]
+
+        # Batch query waiting counts
+        from django.db.models import Count
+        waiting_qs = Reservation.objects.filter(equipment_id__in=equip_ids, status='WAITING')\
+            .values('equipment_id')\
+            .annotate(waiting_count=Count('id'))
+        waiting_map = {item['equipment_id']: item['waiting_count'] for item in waiting_qs}
+
+        serializer = self.get_serializer(equips, many=True)
+        data = serializer.data
+        # attach waiting_count to each serialized item
+        for item in data:
+            try:
+                eid = int(item.get('id'))
+            except Exception:
+                eid = None
+            item['waiting_count'] = waiting_map.get(eid, 0)
+
+        return Response(data)
 
     @action(detail=True, methods=['patch'], url_path='operational-state')
     def set_operational_state(self, request, pk=None):

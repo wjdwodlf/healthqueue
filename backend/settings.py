@@ -167,11 +167,10 @@ SIMPLE_JWT = {
 # 6. AI 모델 로드 설정 (파일 맨 아래)
 # (이전에 추가했던 AI 모델 로더도 여기에 포함되어야 합니다)
 # ==========================================================
-try:
-    from ai_model.prediction_utils import load_ai_model
-    load_ai_model()
-except ImportError:
-    print("AI 모델 유틸리티를 로드하는 중 오류 발생 (무시하고 진행)")
+# NOTE: Do NOT eagerly load AI models at settings import time. Loading
+# large ML models here slows down process start/restart (gunicorn workers).
+# The ai_model module exposes a lazy loader; the model will be loaded on
+# first use inside the prediction utilities.
 
 # ==========================================================
 # Celery 설정
@@ -189,5 +188,10 @@ CELERY_BEAT_SCHEDULE = {
         'args': (),
     },
 }
+
+# SSE polling frequency used by the simple equipment_stream prototype. Lower
+# values make the UI more responsive but increase DB load. Tune for your
+# deployment; we recommend 2-5 seconds for small deployments, 10+ for larger.
+EQUIPMENT_SSE_POLL_INTERVAL_SECONDS = 5
 
 
