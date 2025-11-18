@@ -12,7 +12,9 @@ from .serializers import EquipmentSerializer
 from users.models import UserProfile
 from reports.models import Report
 from gyms.models import GymMembership, Gym
-from workouts.models import Reservation
+# NOTE: Avoid importing Reservation at module level to prevent circular import
+# and slow startup. Import inside functions where needed.
+# from workouts.models import Reservation
 
 # 추가: SSE(Server-Sent Events) 지원을 위한 임포트
 from django.http import StreamingHttpResponse, HttpResponse
@@ -31,13 +33,15 @@ class EquipmentViewSet(viewsets.ModelViewSet):
 
     def list(self, request, *args, **kwargs):
         """Override list to batch-compute waiting counts to avoid N+1 queries."""
+        from workouts.models import Reservation  # lazy import to avoid circular dependency at module load
+        from django.db.models import Count
+        
         qs = self.get_queryset()
         # Evaluate QS to get ids
         equips = list(qs)
         equip_ids = [e.id for e in equips]
 
         # Batch query waiting counts
-        from django.db.models import Count
         waiting_qs = Reservation.objects.filter(equipment_id__in=equip_ids, status='WAITING')\
             .values('equipment_id')\
             .annotate(waiting_count=Count('id'))
@@ -181,7 +185,9 @@ def equipment_stream(request):
     def event_stream():
         # initial snapshot: send all equipments as a single event
         # Batch compute waiting counts to avoid N+1 queries
+        from workouts.models import Reservation  # lazy import
         from django.db.models import Count
+        
         equipments = Equipment.objects.all()
         equip_ids = [eq.id for eq in equipments]
         
