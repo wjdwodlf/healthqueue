@@ -38,8 +38,8 @@ class Reservation(models.Model):
     class Meta:
         # Composite index for fast equipment waiting count queries
         indexes = [
-            models.Index(fields=['equipment', 'status'], name='reservation_equip_status_idx'),
-            models.Index(fields=['status', 'notified_at'], name='reservation_status_notified_idx'),
+            models.Index(fields=['equipment', 'status'], name='res_equip_status_idx'),
+            models.Index(fields=['status', 'notified_at'], name='res_status_notified_idx'),
         ]
 
     def __str__(self):

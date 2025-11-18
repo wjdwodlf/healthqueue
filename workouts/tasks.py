@@ -6,6 +6,17 @@ from .models import Reservation
 
 from .models import UsageSession
 from equipment.models import Equipment
+from equipment.event_bus import publish_equipment_update, publish_equipment_update_by_id
+
+
+def _schedule_equipment_publish(equipment):
+    if equipment is None:
+        return
+
+    def _emit():
+        publish_equipment_update(equipment)
+
+    transaction.on_commit(_emit)
 from .constants import DEFAULT_NOTIFICATION_TIMEOUT_MINUTES
 
 
@@ -35,10 +46,12 @@ def expire_notified_reservations(self, timeout_minutes: float = None, batch_size
             if not reservations:
                 break
 
+            touched_eq_ids = set()
             for r in reservations:
                 r.status = 'EXPIRED'
                 r.save()
                 expired_total += 1
+                touched_eq_ids.add(r.equipment_id)
 
                 # notify next waiting
                 next_r = (
@@ -51,7 +64,15 @@ def expire_notified_reservations(self, timeout_minutes: float = None, batch_size
                     next_r.notified_at = timezone.now()
                     next_r.save()
                     notified_total += 1
+                    touched_eq_ids.add(next_r.equipment_id)
                     # TODO: enqueue/send FCM push notification for next_r.user
+
+            if touched_eq_ids:
+                def _emit(ids):
+                    for eq_id in ids:
+                        publish_equipment_update_by_id(eq_id)
+
+                transaction.on_commit(lambda ids=list(touched_eq_ids): _emit(ids))
 
     return {'expired': expired_total, 'notified': notified_total}
 
@@ -95,6 +116,7 @@ def expire_active_sessions(self, batch_size: int = 50):
                         eq = Equipment.objects.select_for_update().get(pk=s.equipment.pk)
                         eq.status = 'AVAILABLE'
                         eq.save()
+                        _schedule_equipment_publish(eq)
 
                         next_r = (
                             Reservation.objects.select_for_update(skip_locked=True)

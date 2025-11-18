@@ -24,10 +24,10 @@ class Migration(migrations.Migration):
         # Add composite indexes for fast queries
         migrations.AddIndex(
             model_name='reservation',
-            index=models.Index(fields=['equipment', 'status'], name='reservation_equip_status_idx'),
+            index=models.Index(fields=['equipment', 'status'], name='res_equip_status_idx'),
         ),
         migrations.AddIndex(
             model_name='reservation',
-            index=models.Index(fields=['status', 'notified_at'], name='reservation_status_notified_idx'),
+            index=models.Index(fields=['status', 'notified_at'], name='res_status_notified_idx'),
         ),
     ]

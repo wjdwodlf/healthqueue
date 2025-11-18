@@ -24,6 +24,8 @@ from django.conf import settings
 from rest_framework_simplejwt.backends import TokenBackend
 from django.contrib.auth import get_user_model
 
+from .event_bus import equipment_event_bus
+
 
 class EquipmentViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -212,39 +214,24 @@ def equipment_stream(request):
         # build last-seen snapshot to detect changes
         last_state = {item['id']: item for item in serialized}
 
-        # poll interval (seconds) can be configured in settings; default to 30s to reduce DB load
-        poll_interval = getattr(settings, 'EQUIPMENT_SSE_POLL_INTERVAL_SECONDS', 30)
+        heartbeat = getattr(settings, 'EQUIPMENT_SSE_HEARTBEAT_SECONDS', 30)
+        last_seq = 0
 
         try:
             while True:
-                time.sleep(poll_interval)
+                events, last_seq, timed_out = equipment_event_bus.wait_for_events(last_seq, timeout=heartbeat)
 
-                # Fetch current equipments with annotated waiting_count in SINGLE query
-                current_equips = Equipment.objects.all().annotate(
-                    waiting_count=Count(
-                        'reservation',
-                        filter=Q(reservation__status='WAITING'),
-                        distinct=True
-                    )
-                )
-                
-                for eq in current_equips:
-                    eq_id = str(eq.id)
-                    current_repr = {
-                        'id': eq_id,
-                        'name': eq.name,
-                        'type': getattr(eq, 'type', None),
-                        'status': getattr(eq, 'status', None),
-                        'image_url': getattr(eq, 'image_url', '') or getattr(eq, 'image', ''),
-                        'base_session_time_minutes': getattr(eq, 'base_session_time_minutes', None),
-                        'waiting_count': eq.waiting_count,
-                    }
-
-                    last = last_state.get(eq_id)
-                    if last is None or last.get('status') != current_repr['status'] or last.get('waiting_count') != current_repr['waiting_count']:
-                        # send an update event for this equipment
-                        yield f"event: update\ndata: {json.dumps(current_repr)}\n\n"
-                        last_state[eq_id] = current_repr
+                if events:
+                    for event in events:
+                        payload = event.get('payload', {})
+                        eq_id = payload.get('id')
+                        if eq_id:
+                            last_state[eq_id] = payload
+                        event_type = event.get('type') or 'update'
+                        yield f"event: {event_type}\ndata: {json.dumps(payload)}\n\n"
+                else:
+                    # heartbeat keeps the connection alive while there are no events
+                    yield "event: heartbeat\ndata: {}\n\n"
 
         except GeneratorExit:
             # client disconnected

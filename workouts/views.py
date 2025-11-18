@@ -16,12 +16,25 @@ from django.db import transaction
 import datetime
 import logging
 
+from equipment.event_bus import publish_equipment_update
+
 # "AI 두뇌 사용설명서"에서 예측 함수를 가져옵니다.
 # NOTE: Lazy import ai_model to avoid loading heavy ML dependencies at startup
 # from ai_model.prediction_utils import get_ai_recommendation
 from .constants import DEFAULT_NOTIFICATION_TIMEOUT_MINUTES
 
 logger = logging.getLogger(__name__)
+
+
+def _notify_equipment_change(equipment):
+    """Schedule an SSE update after the current transaction commits."""
+    if not equipment:
+        return
+
+    def _emit():
+        publish_equipment_update(equipment)
+
+    transaction.on_commit(_emit)
 
 class UsageSessionViewSet(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated] # <- 이 줄 추가
@@ -81,6 +94,7 @@ class StartSessionView(APIView):
                 prev_equipment = Equipment.objects.select_for_update().get(pk=prev_equipment.pk)
                 prev_equipment.status = 'AVAILABLE'
                 prev_equipment.save()
+                _notify_equipment_change(prev_equipment)
 
                 # notify next waiting on previous equipment
                 next_prev = Reservation.objects.select_for_update().filter(equipment=prev_equipment, status='WAITING').order_by('created_at').first()
@@ -199,6 +213,7 @@ class StartSessionView(APIView):
 
                 equipment.status = 'IN_USE'
                 equipment.save()
+                _notify_equipment_change(equipment)
 
                 session = UsageSession.objects.create(
                     user=user,
@@ -247,6 +262,7 @@ class EndSessionView(APIView):
                 equipment = Equipment.objects.select_for_update().get(pk=current_session.equipment.pk)
                 equipment.status = 'AVAILABLE'
                 equipment.save()
+                _notify_equipment_change(equipment)
 
 
                 # 다음 대기자에게 알림 보내기 (해당 행도 트랜잭션 내에서 처리)
@@ -307,6 +323,8 @@ class JoinQueueView(APIView):
         # position은 대기열에서의 순번 (마지막에 추가되었으므로 waiting_count)
         position = waiting_count
 
+        _notify_equipment_change(equipment)
+
         return Response({'reservation_id': reservation.id, 'equipment_id': equipment.id, 'position': position, 'waiting_count': waiting_count}, status=status.HTTP_201_CREATED)
 
 
@@ -351,4 +369,5 @@ class LeaveQueueView(APIView):
             # TODO: FCM 푸시 알림 전송
 
         waiting_count = Reservation.objects.filter(equipment=equipment, status='WAITING').count()
+        _notify_equipment_change(equipment)
         return Response({'message': '대기열에서 탈퇴 처리되었습니다.', 'waiting_count': waiting_count}, status=status.HTTP_200_OK)
